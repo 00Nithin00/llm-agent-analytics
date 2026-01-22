@@ -93,40 +93,40 @@ def run_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
     raise ValueError(f"Unknown tool: {name}")
 
 def answer(question: str) -> Tuple[str, Optional[str], Optional[Dict[str, Any]]]:
-    """Returns: (final_answer, tool_used, tool_result)"""
-    resp = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": question},
-        ],
-        tools=TOOL_SPECS,
-        tool_choice="auto",
-        temperature=0.2,
-    )
-
-    msg = resp.choices[0].message
-
-    # If the model decided to call a tool
-    if msg.tool_calls:
-        tool_call = msg.tool_calls[0]
-        tool_name = tool_call.function.name
-        tool_args = json.loads(tool_call.function.arguments or "{}")
-        tool_result = run_tool(tool_name, tool_args)
-
-        # Ask model to summarize tool output
-        resp2 = client.chat.completions.create(
+    try:
+        resp = client.chat.completions.create(
             model=MODEL,
             messages=[
                 {"role": "system", "content": SYSTEM},
                 {"role": "user", "content": question},
-                {"role": "assistant", "content": f"Tool used: {tool_name}\nTool result: {json.dumps(tool_result)[:6000]}"},
-                {"role": "user", "content": "Provide a concise answer based on the tool result."},
             ],
+            tools=TOOL_SPECS,
+            tool_choice="auto",
             temperature=0.2,
         )
-        final_answer = resp2.choices[0].message.content or "Done."
-        return final_answer, tool_name, tool_result
-
-    # Otherwise answer directly
-    return msg.content or "Done.", None, None
+    except Exception as e:
+        # Fallback: deterministic routing (offline-safe)
+        q = question.lower()
+        if "describe" in q or "column" in q:
+            return (
+                "Here is a description of the dataset.",
+                "describe_data",
+                tools.describe_data(),
+            )
+        if "anomal" in q or "outlier" in q:
+            return (
+                "Detected anomalies in sales.",
+                "detect_anomalies_zscore",
+                tools.detect_anomalies_zscore("sales"),
+            )
+        if "plot" in q or "trend" in q:
+            return (
+                "Generated a sales time-series plot.",
+                "plot_timeseries",
+                tools.plot_timeseries("date", "sales"),
+            )
+        return (
+            "Here are summary statistics.",
+            "summary_stats",
+            tools.summary_stats(),
+        )
